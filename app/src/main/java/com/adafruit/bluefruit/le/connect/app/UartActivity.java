@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.graphics.Color;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.Spannable;
@@ -40,8 +41,18 @@ import com.adafruit.bluefruit.le.connect.ble.BleManager;
 import com.adafruit.bluefruit.le.connect.mqtt.MqttManager;
 import com.adafruit.bluefruit.le.connect.mqtt.MqttSettings;
 
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.InputStreamEntity;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.DefaultHttpClient;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.Charset;
 import java.text.DateFormat;
@@ -654,8 +665,95 @@ public class UartActivity extends UartInterfaceActivity implements MqttManager.M
 
                 mDataBufferLastSize = mDataBuffer.size();
                 mBufferTextView.setText(mTextSpanBuffer);
+                String lastDataField = getLastData(mTextSpanBuffer.toString());
+                String dataJson = asJson(lastDataField);
+                new SendPostToApiTask().execute(dataJson);
+
                 mBufferTextView.setSelection(0, mTextSpanBuffer.length());        // to automatically scroll to the end
             }
+        }
+    }
+
+    public String getLastData(String sb){
+       return sb.substring(sb.lastIndexOf("#"));
+    }
+
+    class SendPostToApiTask extends AsyncTask<String, Integer, String>{
+
+        @Override
+        protected String doInBackground(String... params) {
+            String result ="";
+            for(String jsonData:params){
+               result+= postDataToApi(jsonData);
+            }
+            return result;
+        }
+    }
+
+    public String postDataToApi(String json){
+        String result ="";
+        try{
+            HttpClient client = new DefaultHttpClient();
+            HttpPost httpPost = new HttpPost("https://iot-backend-metropolia.herokuapp.com/api/data/12");
+            StringEntity se = new StringEntity(json);
+            httpPost.setEntity(se);
+            httpPost.setHeader("Accept", "application/json");
+            httpPost.setHeader("Content-type", "application/json");
+
+            HttpResponse response = client.execute(httpPost);
+            java.io.InputStream isEnt = response.getEntity().getContent();
+            if(isEnt!=null){
+                BufferedReader br = new BufferedReader(new InputStreamReader(isEnt));
+                String line = "";
+                while((line = br.readLine())!=null){
+                    result+=line;
+                }
+                isEnt.close();
+            }
+            Log.d("MUMMO", "postDataToApi result: "+result);
+
+        }catch (Exception e){
+            Log.d("MUMMO", "postDataToApi: ",e);
+        }
+    return result;
+
+    }
+
+    public String asJson(String data){
+        //POST https://iot-backend-metropolia.herokuapp.com/api/data/12
+
+        JSONObject jsonObject = new JSONObject();
+      try{
+          jsonObject.accumulate("name","9dof");
+        jsonObject.accumulate("description", "motion sensor");
+        jsonObject.accumulate("sensorStatus", "1");
+//          jsonObject.accumulate("properties", )
+        ReadingsTuple tuple = new ReadingsTuple(data, System.currentTimeMillis()+"");
+          JSONArray array = new JSONArray();
+          array.put(tuple);
+          jsonObject.put("readings", array);
+      } catch(Exception e){
+          Log.d("MUMMO", "asJson failed : ",e);
+      }
+    return jsonObject.toString();
+    }
+
+    private static class ReadingsTuple {
+        String value;
+        String createdAt;
+
+        public ReadingsTuple(String value, String createdAt){
+            this.value = value;
+            this.createdAt = createdAt;
+        }
+        public String getValue(){
+            return value;
+        }
+        public String getCreatedAt(){
+            return createdAt;
+        }
+        public String toString(){
+            return createdAt+": "+value;
         }
     }
 
